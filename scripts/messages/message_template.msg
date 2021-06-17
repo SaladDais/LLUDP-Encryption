@@ -1419,6 +1419,10 @@ version 2.0
 		{	SimAccess		U8				}
 		{	TeleportFlags 	U32				}
 	}
+	{
+		CircuitEncryptionInfo	Variable
+		{	SupportedSchemes	U8	} // ORed together vals from encryption scheme enum
+	}
 }
 
 // StartLure viewer->sim
@@ -3417,6 +3421,10 @@ version 2.0
 		{	Handle		U64	}
 		{	IP			IPADDR	}
 		{	Port		IPPORT	}
+	}
+	{
+		CircuitEncryptionInfo	Variable
+		{	SupportedSchemes	U8	} // ORed together vals from encryption scheme enum
 	}
 }
 

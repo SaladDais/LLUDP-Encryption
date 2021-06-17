@@ -40,6 +40,11 @@
 #include <iterator>
 #include <sstream>
 
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/hmac.h>
+
 #include "llapr.h"
 #include "apr_portable.h"
 #include "apr_network_io.h"
@@ -181,6 +186,7 @@ void LLMessageSystem::init()
     mInvalidOnCircuitPackets = 0;   // total # of on-circuit packets rejected
 
 	mOurCircuitCode = 0;
+	mbLastMessageEncrypted = FALSE;
 
 	mIncomingCompressedSize = 0;
 	mCurrentRecvPacketID = 0;
@@ -358,6 +364,7 @@ void LLMessageSystem::clearReceiveState()
 	mLastReceivingIF.invalidate();
 	mMessageReader->clearMessage();
 	mLastMessageFromTrustedMessageService = false;
+	mbLastMessageEncrypted = FALSE;
 }
 
 
@@ -507,6 +514,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 		
 		BOOL recv_reliable = FALSE;
 		BOOL recv_resent = FALSE;
+		BOOL too_short = FALSE;
 		S32 acks = 0;
 		S32 true_rcv_size = 0;
 
@@ -521,6 +529,11 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 		mLastReceivingIF = mPacketRing.getLastReceivingInterface();
 		
 		if (receive_size < (S32) LL_MINIMUM_VALID_PACKET_SIZE)
+			too_short = TRUE;
+		else if (buffer[0] & LL_ENCRYPTED_FLAG)
+			too_short = receive_size < (S32) MINIMUM_VALID_ENCRYPTED_PACKET_SIZE;
+
+		if (too_short)
 		{
 			// A receive size of zero is OK, that means that there are no more packets available.
 			// Ones that are non-zero but below the minimum packet size are worrisome.
@@ -534,9 +547,69 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 		}
 		else
 		{
-			LLHost host;
+			LLHost host = getSender();
 			LLCircuitData* cdp;
-			
+
+			if (buffer[0] & LL_ENCRYPTED_FLAG)
+			{
+				mbLastMessageEncrypted = TRUE;
+				if (buffer[1] != 0x01)
+				{
+					LL_WARNS("Messaging") << "Unsupported encryption scheme " << buffer[1] << LL_ENDL;
+					valid_packet = FALSE;
+					continue;
+				}
+				// This is _only_ used for looking up the key used to encrypt the message,
+				// so this is distinct from `cdp`. Because of the loose coupling between the
+				// encrypted wrapper and the underlying message it would technically be possible
+				// to encrypt a message with another circuit's key. Basically, never use it to
+				// identify an underlying message as belonging to a particular circuit.
+				LLCircuitData* key_cdp = mCircuitInfo.findCircuit(host);
+				U32 key_circuit_code = ntohl(*(U32 *)&buffer[14]);
+				U8 *key = nullptr;
+				// If we already have a circuit for the sender's address, we may have an existing
+				// encryption key tied to the circuit.
+				if (key_cdp != nullptr)
+				{
+					key = key_cdp->getEncryptionKey();
+				}
+				// no circuit, or circuit doesn't have a key associated with it, try to derive one.
+				if (key_circuit_code && key == nullptr)
+				{
+					if(key_circuit_code == getOurCircuitCode())
+					{
+						// viewer case, since we have our own circuit code
+						key = deriveEncryptionKey(getMySessionID(), host);
+					}
+					else
+					{
+						// sim case, we have something in our circuit code -> session map.
+						// This map isn't populated in the viewer. We need this for the initial UseCircuitCode
+						// from a viewer since due to NAT we have no way of knowing which addr tuple they
+						// will connect from, and otherwise we have no idea what key to use to decrypt.
+						const code_session_map_t::iterator it = mCircuitCodes.find(key_circuit_code);
+						if (it != mCircuitCodes.end()) {
+							// I think UntrustedInterface is the address that gets advertised to clients?
+							key = deriveEncryptionKey(it->second, getUntrustedInterface());
+						}
+					}
+				}
+
+				if (key == nullptr)
+				{
+					LL_WARNS("Messaging") << "Received encrypted packet on unencrypted circuit " <<
+						key_circuit_code << LL_ENDL;
+					valid_packet = FALSE;
+					continue;
+				}
+				if (!decryptMessage(&buffer, &receive_size, key))
+				{
+					LL_WARNS("Messaging") << "Received invalid encrypted packet with key ID " <<
+										  key_circuit_code << LL_ENDL;
+					valid_packet = FALSE;
+					continue;
+				}
+			}
 			// note if packet acks are appended.
 			if(buffer[0] & LL_ACK_FLAG)
 			{
@@ -561,7 +634,6 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 			// process the message as normal
 			mIncomingCompressedSize = zeroCodeExpand(&buffer, &receive_size);
 			mCurrentRecvPacketID = ntohl(*((U32*)(&buffer[1])));
-			host = getSender();
 
 			const bool resetPacketId = true;
 			cdp = findCircuit(host, resetPacketId);
@@ -1100,6 +1172,103 @@ S32 LLMessageSystem::flushReliable(const LLHost &host)
 	return send_bytes;
 }
 
+// static
+U8* LLMessageSystem::deriveEncryptionKey(const LLUUID &session_id, const LLHost &sim_addr)
+{
+	// HMAC_SHA256(session_id, sim_address || sim_port)
+	unsigned int length;
+	U8* key = new U8[32];
+	U8 to_hash[6];
+	// LLHost's address is already network-endian
+	*((U32 *)&to_hash[0]) = sim_addr.getAddress();
+	*((U16 *)&to_hash[4]) = htons(sim_addr.getPort());
+	HMAC(EVP_sha256(), &session_id.mData, 16, (U8*)&to_hash, 6, key, &length);
+	return key;
+}
+
+// static
+BOOL LLMessageSystem::encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *key, U32 circuit_code)
+{
+	// We expect this to be sent off in a packet immediately, so this saves an alloc.
+	// not thread-safe, same as zero_code().
+	static U8 encryptedSendBuffer[MAX_BUFFER_SIZE];
+	U8 tag[16];
+	int len, ciphertext_len;
+	EVP_CIPHER_CTX *ctx;
+	U8 *data = *data_ptr;
+	U8 *ciphertext = (U8 *)&encryptedSendBuffer[18];
+
+	encryptedSendBuffer[0] = 0x08; // encrypted flag
+	encryptedSendBuffer[1] = 0x01; // v1 encryption scheme
+	// first 4 bytes of nonce are packet ID
+	memcpy(&encryptedSendBuffer[2], &data[1], 4);
+	// The last 8 are random
+	RAND_bytes(&encryptedSendBuffer[6], 8);
+	// circuit code / key id follows the nonce
+	(*(U32 *)&encryptedSendBuffer[14]) = htonl(circuit_code);
+
+	if(!(ctx = EVP_CIPHER_CTX_new()))
+		return FALSE;
+
+	// use the 12-byte nonce we just wrote for encryption
+	if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, (U8*)&encryptedSendBuffer[2]))
+		goto error;
+	if(1 != EVP_EncryptUpdate(ctx, ciphertext, &len, data, (int)*data_size))
+		goto error;
+	// does not include tag length!
+	ciphertext_len = len;
+	if(1 != EVP_EncryptFinal_ex(ctx, ciphertext, &len))
+		goto error;
+
+	// Write the authentication tag to the end of the ciphertext
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, &ciphertext[ciphertext_len]);
+	EVP_CIPHER_CTX_free(ctx);
+
+	*data_size = ciphertext_len + MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
+	*data_ptr = (U8 *)&encryptedSendBuffer;
+	return TRUE;
+
+error:
+	EVP_CIPHER_CTX_free(ctx);
+	return FALSE;
+}
+
+BOOL LLMessageSystem::decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *key)
+{
+	// not thread-safe, same as zero_code().
+	U8 tag[16];
+	int len;
+	int ciphertext_len = *data_size - MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
+	EVP_CIPHER_CTX *ctx;
+	U8 *data = *data_ptr;
+	U8 *nonce = &data[2];
+	U8 *ciphertext = &data[18];
+	U8 *plaintext = (U8 *)&mEncryptedRecvBuffer;
+
+	if(!(ctx = EVP_CIPHER_CTX_new()))
+		return FALSE;
+
+	if(!EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce))
+		goto error;
+	if(!EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
+		goto error;
+	// Set expected authentication tag, past the end of the ciphertext
+	if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, ciphertext + ciphertext_len))
+		goto error;
+	if(!EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
+		goto error;
+
+	EVP_CIPHER_CTX_free(ctx);
+
+	*data_size = ciphertext_len;
+	*data_ptr = plaintext;
+	return TRUE;
+
+error:
+	EVP_CIPHER_CTX_free(ctx);
+	return FALSE;
+}
+
 // This can be called from signal handlers,
 // so should should not use LL_INFOS().
 S32 LLMessageSystem::sendMessage(const LLHost &host)
@@ -1222,8 +1391,14 @@ S32 LLMessageSystem::sendMessage(const LLHost &host)
 		mReliablePacketsOut++;
 	}
 
+	U32 overhead = 0;
+	if (cdp->isEncrypted())
+	{
+		overhead = MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
+	}
+
 	// tack packet acks onto the end of this message
-	S32 space_left = (MTUBYTES - buffer_length) / sizeof(TPACKETID); // space left for packet ids
+	S32 space_left = (MTUBYTES - buffer_length - overhead) / sizeof(TPACKETID); // space left for packet ids
 	S32 ack_count = (S32)cdp->mAcks.size();
 	BOOL is_ack_appended = FALSE;
 	std::vector<TPACKETID> acks;
@@ -1279,8 +1454,24 @@ S32 LLMessageSystem::sendMessage(const LLHost &host)
 		is_ack_appended = TRUE;
 	}
 
-	BOOL success;
-	success = mPacketRing.sendPacket(mSocket, (char *)buf_ptr, buffer_length, host);
+	BOOL may_send = TRUE;
+	if (cdp->isEncrypted())
+	{
+		const U8* key = cdp->getEncryptionKey();
+		// getOurCircuitCode will be 0 if newsim if this is called from newsim. That's fine
+		// since viewers should never need the circuit code from the message header to figure
+		// out what encryption key to use. Sims are strongly tied to a specific circuit address
+		// in the viewer code and they can't change while connected.
+		if (!encryptMessage(&buf_ptr, &buffer_length, key, getOurCircuitCode()))
+		{
+			LL_ERRS("Messaging") << "Failed to encrypt outbound message, refusing to send" << LL_ENDL;
+			may_send = FALSE;
+		}
+	}
+
+	BOOL success = FALSE;
+	if (may_send)
+		success = mPacketRing.sendPacket(mSocket, (char *)buf_ptr, buffer_length, host);
 
 	if (!success)
 	{
@@ -1534,6 +1725,30 @@ void LLMessageSystem::enableCircuit(const LLHost &host, BOOL trusted)
 		cdp->setAlive(TRUE);
 	}
 	cdp->setTrusted(trusted);
+}
+
+void LLMessageSystem::enableCircuitEncryption(
+	const LLHost &remote_host, const LLUUID &session_id)
+{
+	// On the client both remote host and circuit host are the same
+	enableCircuitEncryption(remote_host, remote_host, session_id);
+}
+
+void LLMessageSystem::enableCircuitEncryption(
+	const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id)
+{
+	// remote host may be a client address from newsim's point of view, but the circuit
+	// host is the one that's mixed into the key. In newsim that'll be the untrusted message
+	// address that clients send messages to.
+	LLCircuitData *cdp = findCircuit(remote_host, FALSE);
+	if (cdp != nullptr)
+	{
+		cdp->setEncryptionKey(deriveEncryptionKey(session_id, circuit_host));
+	}
+	else
+	{
+		LL_ERRS("Messaging") << "Encryption: Couldn't find circuit for " << remote_host << LL_ENDL;
+	}
 }
 
 void LLMessageSystem::disableCircuit(const LLHost &host)
@@ -1962,6 +2177,11 @@ void LLMessageSystem::processUseCircuitCode(LLMessageSystem* msg,
 		{
 			cdp->setRemoteID(id);
 			cdp->setRemoteSessionID(session_id);
+			// If the UseCircuitCode was encrypted, then we should enable encryption for the circuit
+			if (msg->getLastMessageEncrypted())
+			{
+				cdp->setEncryptionKey(deriveEncryptionKey(session_id, msg->getUntrustedInterface()));
+			}
 		}
 
 		if (!had_circuit_already)
@@ -4024,6 +4244,11 @@ void LLMessageSystem::banUdpMessage(const std::string& name)
 const LLHost& LLMessageSystem::getSender() const
 {
 	return mLastSender;
+}
+
+BOOL LLMessageSystem::getLastMessageEncrypted() const
+{
+	return mbLastMessageEncrypted;
 }
 
 void LLMessageSystem::sendUntrustedSimulatorMessageCoro(std::string url, std::string message, LLSD body, UntrustedCallback_t callback)

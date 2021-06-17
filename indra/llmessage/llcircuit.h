@@ -99,6 +99,12 @@ public:
 	const LLUUID& getRemoteSessionID() const { return mRemoteSessionID; }
 	void setRemoteID(const LLUUID& id) { mRemoteID = id; }
 	void setRemoteSessionID(const LLUUID& id) { mRemoteSessionID = id; }
+	U8* getEncryptionKey() const { return mEncryptionKey; }
+	void setEncryptionKey(U8* key)
+	{
+		delete mEncryptionKey;
+		mEncryptionKey = key;
+	}
 
 	void		setTrusted(BOOL t);
 
@@ -113,6 +119,7 @@ public:
 	// ACCESSORS
 	BOOL		isAlive() const;
 	BOOL		isBlocked() const;
+	BOOL 		isEncrypted() const;
 	BOOL		getAllowTimeout() const;
 	F32Milliseconds	getPingDelayAveraged();
 	F32Milliseconds	getPingInTransitTime();
@@ -195,6 +202,7 @@ protected:
 	LLHost mHost;
 	LLUUID mRemoteID;
 	LLUUID mRemoteSessionID;
+	U8* mEncryptionKey;
 
 	LLThrottleGroup	mThrottles;
 

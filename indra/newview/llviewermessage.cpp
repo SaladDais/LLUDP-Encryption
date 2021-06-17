@@ -3692,6 +3692,7 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 	U32 location_id;
 	U32 sim_ip;
 	U16 sim_port;
+	BOOL encrypted;
 	LLVector3 pos, look_at;
 	U64 region_handle;
 	msg->getU32Fast(_PREHASH_Info, _PREHASH_LocationID, location_id);
@@ -3723,6 +3724,17 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 #endif
 // </FS:CR> Aurora Sim
 	
+	// NB: indra might need to add a stub block to their TeleportFinish template to hack around the
+	// region size block that some impls added to their message templates, they might
+	// expect these to be there. Dunno.
+	if (msg->has("CircuitEncryptionInfo"))
+	{
+		U8 supported_schemes;
+		msg->getU8("CircuitEncryptionInfo", "SupportedSchemes", supported_schemes);
+		// V1 encryption scheme supported
+		encrypted = supported_schemes & 0x1;
+	}
+
 	std::string seedCap;
 	msg->getStringFast(_PREHASH_Info, _PREHASH_SeedCapability, seedCap);
 
@@ -3749,6 +3761,10 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 
 	// Viewer trusts the simulator.
 	gMessageSystem->enableCircuit(sim_host, TRUE);
+	if (encrypted)
+	{
+		gMessageSystem->enableCircuitEncryption(sim_host, gAgentSessionID);
+	}
 // <FS:CR> Aurora Sim
 	//LLViewerRegion* regionp =  LLWorld::getInstance()->addRegion(region_handle, sim_host);
 	LLViewerRegion* regionp =  LLWorld::getInstance()->addRegion(region_handle, sim_host, region_size_x, region_size_y);

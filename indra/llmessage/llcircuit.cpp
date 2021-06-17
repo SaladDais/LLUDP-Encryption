@@ -109,7 +109,8 @@ LLCircuitData::LLCircuitData(const LLHost &host, TPACKETID in_id,
 	mCurrentResendCount(0),
 	mLastPacketGap(0),
 	mHeartbeatInterval(circuit_heartbeat_interval), 
-	mHeartbeatTimeout(circuit_timeout)
+	mHeartbeatTimeout(circuit_timeout),
+	mEncryptionKey(nullptr)
 {
 	// Need to guarantee that this time is up to date, we may be creating a circuit even though we haven't been
 	//  running a message system loop.
@@ -193,6 +194,7 @@ LLCircuitData::~LLCircuitData()
 		std::copy(doomed.begin(), doomed.end(), append);
 		LL_INFOS() << str.str() << LL_ENDL;
 	}
+	setEncryptionKey(nullptr);
 }
 
 
@@ -353,12 +355,28 @@ S32 LLCircuitData::resendUnackedPackets(const F64Seconds now)
 			}
 
 			packetp->mBuffer[0] |= LL_RESENT_FLAG;  // tag packet id as being a resend	
+			U8 *buf_ptr = packetp->mBuffer;
+			U32 buffer_length = packetp->mBufferLength;
+			BOOL may_send = TRUE;
+			if (isEncrypted())
+			{
+				U32 circuit_code = gMessageSystem->getOurCircuitCode();
+				const U8 *key = getEncryptionKey();
+				if (!gMessageSystem->encryptMessage(&buf_ptr, &buffer_length, key, circuit_code))
+				{
+					LL_ERRS("Messaging") << "Failed to encrypt outbound message, refusing to send" << LL_ENDL;
+					may_send = FALSE;
+				}
+			}
 
-			gMessageSystem->mPacketRing.sendPacket(packetp->mSocket, 
-											   (char *)packetp->mBuffer, packetp->mBufferLength, 
-											   packetp->mHost);
+			if (may_send)
+			{
+				gMessageSystem->mPacketRing.sendPacket(packetp->mSocket,
+													   (char *) buf_ptr, buffer_length,
+													   packetp->mHost);
+			}
 
-			mThrottles.throttleOverflow(TC_RESEND, packetp->mBufferLength * 8.f);
+			mThrottles.throttleOverflow(TC_RESEND, buffer_length * 8.f);
 
 			// The new method, retry time based on ping
 			if (packetp->mPingBasedRetry)
@@ -1380,6 +1398,9 @@ BOOL LLCircuitData::isBlocked() const
 	return mBlocked;
 }
 
+BOOL LLCircuitData::isEncrypted() const {
+	return mEncryptionKey != nullptr;
+}
 
 BOOL LLCircuitData::getAllowTimeout() const
 {

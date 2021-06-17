@@ -1629,10 +1629,18 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
 	U64		handle;
 	U32		ip_u32;
 	U16		port;
+	BOOL	encrypted = FALSE;
 
 	msg->getU64Fast(_PREHASH_SimulatorInfo, _PREHASH_Handle, handle);
 	msg->getIPAddrFast(_PREHASH_SimulatorInfo, _PREHASH_IP, ip_u32);
 	msg->getIPPortFast(_PREHASH_SimulatorInfo, _PREHASH_Port, port);
+	if (msg->has("CircuitEncryptionInfo"))
+	{
+		U8 supported_schemes;
+		msg->getU8("CircuitEncryptionInfo", "SupportedSchemes", supported_schemes);
+		// V1 encryption scheme supported
+		encrypted = supported_schemes & 0x1;
+	}
 
 	// which simulator should we modify?
 	LLHost sim(ip_u32, port);
@@ -1657,6 +1665,10 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
 // </FS:CR> Aurora Sim
 	// Viewer trusts the simulator.
 	msg->enableCircuit(sim, TRUE);
+	if (encrypted)
+	{
+		msg->enableCircuitEncryption(sim, gAgentSessionID);
+	}
 // <FS:CR> Aurora Sim
 	//LLWorld::getInstance()->addRegion(handle, sim);
 	LLWorld::getInstance()->addRegion(handle, sim, region_size_x, region_size_y);

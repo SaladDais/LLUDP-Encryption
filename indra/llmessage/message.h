@@ -132,6 +132,7 @@ const U8 LL_ZERO_CODE_FLAG = 0x80;
 const U8 LL_RELIABLE_FLAG = 0x40;
 const U8 LL_RESENT_FLAG = 0x20;
 const U8 LL_ACK_FLAG = 0x10;
+const U8 LL_ENCRYPTED_FLAG = 0x08;
 
 // 1 byte flags, 4 bytes sequence, 1 byte offset + 1 byte message name (high)
 const S32 LL_MINIMUM_VALID_PACKET_SIZE = LL_PACKET_ID_SIZE + 1;
@@ -142,6 +143,9 @@ enum EPacketHeaderLayout
 	PHL_OFFSET = 5,
 	PHL_NAME = 6
 };
+// send flags byte + scheme byte + nonce + circuit id + GCM authentication tag
+const U32 MESSAGE_ENCRYPTION_OVERHEAD_BYTES = 1 + 1 + 12 + 4 + 16;
+const S32 MINIMUM_VALID_ENCRYPTED_PACKET_SIZE = LL_MINIMUM_VALID_PACKET_SIZE + MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
 
 
 const S32 LL_DEFAULT_RELIABLE_RETRIES = 3;
@@ -430,6 +434,7 @@ public:
 	void dumpPacketToLog();
 
 	char	*getMessageName();
+	BOOL	getLastMessageEncrypted() const;
 
 	const LLHost& getSender() const;
 	U32		getSenderIP() const;			// getSender() is preferred
@@ -458,6 +463,11 @@ public:
 	LLStoredMessagePtr getReceivedMessage() const; 
 	LLStoredMessagePtr getBuiltMessage() const;
 	S32 sendMessage(const LLHost &host, LLStoredMessagePtr message);
+	static BOOL encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *key, U32 circuit_code);
+	BOOL decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *key);
+	static U8* deriveEncryptionKey(const LLUUID &session_id, const LLHost &sim_addr);
+	void enableCircuitEncryption(const LLHost &remote_host, const LLUUID &session_id);
+	void enableCircuitEncryption(const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id);
 
 private:
 	LLSD getReceivedMessageLLSD() const;
@@ -863,6 +873,7 @@ private:
 
 	LLMessagePollInfo						*mPollInfop;
 
+	U8	mEncryptedRecvBuffer[MAX_BUFFER_SIZE];
 	U8	mEncodedRecvBuffer[MAX_BUFFER_SIZE];
 	U8	mTrueReceiveBuffer[MAX_BUFFER_SIZE];
 	S32	mTrueReceiveSize;
@@ -900,6 +911,7 @@ private:
 	void init(); // ctor shared initialisation.
 
 	LLHost mLastSender;
+	BOOL mbLastMessageEncrypted;
 	LLHost mLastReceivingIF;
 	S32 mIncomingCompressedSize;		// original size of compressed msg (0 if uncomp.)
 	TPACKETID mCurrentRecvPacketID;       // packet ID of current receive packet (for reporting)

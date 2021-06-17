@@ -4289,7 +4289,12 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 	LLUrlEntryParcel::setAgentID(gAgentID);
 
 	text = response["session_id"].asString();
-	if(!text.empty()) gAgentSessionID.set(text);
+	if(!text.empty())
+	{
+		gAgentSessionID.set(text);
+		gMessageSystem->setMySessionID(gAgentSessionID);
+	}
+
 //	gDebugInfo["SessionID"] = text;
 
 	// Session id needed for parcel info request in LLUrlEntryParcel
@@ -4394,6 +4399,14 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 	{
 		gMessageSystem->mOurCircuitCode = strtoul(text.c_str(), NULL, 10);
 	}
+
+	U8 supported_encryption_schemes = 0;
+	text = response["supported_encryption_schemes"].asString();
+	if (!text.empty())
+	{
+		supported_encryption_schemes = (U8)strtoul(text.c_str(), NULL, 10);
+	}
+
 	std::string sim_ip_str = response["sim_ip"];
 	std::string sim_port_str = response["sim_port"];
 	if(!sim_ip_str.empty() && !sim_port_str.empty())
@@ -4403,6 +4416,8 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 		if (gFirstSim.isOk())
 		{
 			gMessageSystem->enableCircuit(gFirstSim, TRUE);
+			if (supported_encryption_schemes & 0x01)
+				gMessageSystem->enableCircuitEncryption(gFirstSim, gAgentSessionID);
 		}
 	}
 	std::string region_x_str = response["region_x"];
