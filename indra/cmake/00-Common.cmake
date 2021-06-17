@@ -188,6 +188,8 @@ if (LINUX)
       -msse2
       -mfpmath=sse
       -pthread
+      -O0
+      -ggdb
       )
 
   # force this platform to accept TOS via external browser <FS:ND> No, do not.
