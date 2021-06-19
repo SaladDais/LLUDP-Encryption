@@ -143,8 +143,20 @@ enum EPacketHeaderLayout
 	PHL_OFFSET = 5,
 	PHL_NAME = 6
 };
+enum EEncryptedPacketHeaderLayout
+{
+	EPHL_FLAGS = 0,
+	EPHL_ENCRYPTION_SCHEME = 1,
+};
+enum EEncryptedPacketHeaderV1Layout
+{
+	EPHL1_NONCE = 2,
+	EPHL1_CIRCUIT_CODE = 14,
+	EPHL1_CIPHERTEXT = 18,
+};
+const U32 ENCRYPTED_MESSAGE_TAG_LENGTH = 16;
 // send flags byte + scheme byte + nonce + circuit id + GCM authentication tag
-const U32 MESSAGE_ENCRYPTION_OVERHEAD_BYTES = 1 + 1 + 12 + 4 + 16;
+const U32 MESSAGE_ENCRYPTION_OVERHEAD_BYTES = 1 + 1 + 12 + 4 + ENCRYPTED_MESSAGE_TAG_LENGTH;
 const S32 MINIMUM_VALID_ENCRYPTED_PACKET_SIZE = LL_MINIMUM_VALID_PACKET_SIZE + MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
 
 

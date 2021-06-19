@@ -553,7 +553,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 			if (buffer[0] & LL_ENCRYPTED_FLAG)
 			{
 				mbLastMessageEncrypted = TRUE;
-				if (buffer[1] != 0x01)
+				if (buffer[EPHL_ENCRYPTION_SCHEME] != 0x01)
 				{
 					LL_WARNS("Messaging") << "Unsupported encryption scheme " << buffer[1] << LL_ENDL;
 					valid_packet = FALSE;
@@ -565,7 +565,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				// to encrypt a message with another circuit's key. Basically, never use it to
 				// identify an underlying message as belonging to a particular circuit.
 				LLCircuitData* key_cdp = mCircuitInfo.findCircuit(host);
-				U32 key_circuit_code = ntohl(*(U32 *)&buffer[14]);
+				U32 key_circuit_code = ntohl(*(U32 *)&buffer[EPHL1_CIRCUIT_CODE]);
 				U8 *key = nullptr;
 				// If we already have a circuit for the sender's address, we may have an existing
 				// encryption key tied to the circuit.
@@ -1196,22 +1196,22 @@ BOOL LLMessageSystem::encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *ke
 	int len, ciphertext_len;
 	EVP_CIPHER_CTX *ctx;
 	U8 *data = *data_ptr;
-	U8 *ciphertext = (U8 *)&encryptedSendBuffer[18];
+	U8 *ciphertext = (U8 *)&encryptedSendBuffer[EPHL1_CIPHERTEXT];
 
-	encryptedSendBuffer[0] = 0x08; // encrypted flag
-	encryptedSendBuffer[1] = 0x01; // v1 encryption scheme
-	// first 4 bytes of nonce are packet ID
-	memcpy(&encryptedSendBuffer[2], &data[1], 4);
+	encryptedSendBuffer[EPHL_FLAGS] = LL_ENCRYPTED_FLAG;
+	encryptedSendBuffer[EPHL_ENCRYPTION_SCHEME] = 0x01; // v1 encryption scheme
+	// first 4 bytes of 12 byte nonce are packet ID
+	memcpy(&encryptedSendBuffer[EPHL1_NONCE], &data[PHL_PACKET_ID], 4);
 	// The last 8 are random
-	RAND_bytes(&encryptedSendBuffer[6], 8);
+	RAND_bytes(&encryptedSendBuffer[EPHL1_NONCE + 4], 8);
 	// circuit code / key id follows the nonce
-	(*(U32 *)&encryptedSendBuffer[14]) = htonl(circuit_code);
+	(*(U32 *)&encryptedSendBuffer[EPHL1_CIRCUIT_CODE]) = htonl(circuit_code);
 
 	if(!(ctx = EVP_CIPHER_CTX_new()))
 		return FALSE;
 
 	// use the 12-byte nonce we just wrote for encryption
-	if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, (U8*)&encryptedSendBuffer[2]))
+	if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, (U8*)&encryptedSendBuffer[EPHL1_NONCE]))
 		goto error;
 	if(1 != EVP_EncryptUpdate(ctx, ciphertext, &len, data, (int)*data_size))
 		goto error;
@@ -1221,7 +1221,7 @@ BOOL LLMessageSystem::encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *ke
 		goto error;
 
 	// Write the authentication tag to the end of the ciphertext
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, &ciphertext[ciphertext_len]);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, ENCRYPTED_MESSAGE_TAG_LENGTH, &ciphertext[ciphertext_len]);
 	EVP_CIPHER_CTX_free(ctx);
 
 	*data_size = ciphertext_len + MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
@@ -1237,11 +1237,11 @@ BOOL LLMessageSystem::decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *ke
 {
 	// not thread-safe, same as zero_code().
 	int len;
-	int ciphertext_len = *data_size - MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
 	EVP_CIPHER_CTX *ctx;
 	U8 *data = *data_ptr;
-	U8 *nonce = &data[2];
-	U8 *ciphertext = &data[18];
+	U8 *ciphertext = &data[EPHL1_CIPHERTEXT];
+	int ciphertext_len = *data_size - EPHL1_CIPHERTEXT - ENCRYPTED_MESSAGE_TAG_LENGTH;
+	U8 *nonce = &data[EPHL1_NONCE];
 	U8 *plaintext = (U8 *)&mEncryptedRecvBuffer;
 
 	if(!(ctx = EVP_CIPHER_CTX_new()))
@@ -1252,7 +1252,7 @@ BOOL LLMessageSystem::decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *ke
 	if(!EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
 		goto error;
 	// Set expected authentication tag, past the end of the ciphertext
-	if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, ciphertext + ciphertext_len))
+	if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, ENCRYPTED_MESSAGE_TAG_LENGTH, ciphertext + ciphertext_len))
 		goto error;
 	if(!EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
 		goto error;
