@@ -1192,7 +1192,7 @@ BOOL LLMessageSystem::encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *ke
 	// We expect this to be sent off in a packet immediately, so this saves an alloc.
 	// not thread-safe, same as zero_code().
 	static U8 encryptedSendBuffer[MAX_BUFFER_SIZE];
-	U8 tag[16];
+
 	int len, ciphertext_len;
 	EVP_CIPHER_CTX *ctx;
 	U8 *data = *data_ptr;
@@ -1236,7 +1236,6 @@ error:
 BOOL LLMessageSystem::decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *key)
 {
 	// not thread-safe, same as zero_code().
-	U8 tag[16];
 	int len;
 	int ciphertext_len = *data_size - MESSAGE_ENCRYPTION_OVERHEAD_BYTES;
 	EVP_CIPHER_CTX *ctx;
