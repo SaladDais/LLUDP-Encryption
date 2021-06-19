@@ -446,7 +446,6 @@ public:
 	void dumpPacketToLog();
 
 	char	*getMessageName();
-	BOOL	getLastMessageEncrypted() const;
 
 	const LLHost& getSender() const;
 	U32		getSenderIP() const;			// getSender() is preferred
@@ -462,6 +461,13 @@ public:
 	// This method returns the session id associated with the last
 	// sender.
 	const LLUUID& getSenderSessionID() const;
+
+	BOOL	getLastMessageEncrypted() const;
+	// If the last message was encrypted, this will contain the declared
+	// circuit code from the encrypted message header. May not have any
+	// relation to the key actually used to decrypt the message if we
+	// already had one tied to the circuit.
+	U32		getLastUnverifiedEncryptedCircuitCode() const;
 
 	// set & get the session id (useful for viewers for now.)
 	void setMySessionID(const LLUUID& session_id) { mSessionID = session_id; }
@@ -924,6 +930,7 @@ private:
 
 	LLHost mLastSender;
 	BOOL mbLastMessageEncrypted;
+	U32 mLastUnverifiedEncryptedCircuitCode;
 	LLHost mLastReceivingIF;
 	S32 mIncomingCompressedSize;		// original size of compressed msg (0 if uncomp.)
 	TPACKETID mCurrentRecvPacketID;       // packet ID of current receive packet (for reporting)

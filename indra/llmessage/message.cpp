@@ -187,6 +187,7 @@ void LLMessageSystem::init()
 
 	mOurCircuitCode = 0;
 	mbLastMessageEncrypted = FALSE;
+	mLastUnverifiedEncryptedCircuitCode = 0;
 
 	mIncomingCompressedSize = 0;
 	mCurrentRecvPacketID = 0;
@@ -365,6 +366,7 @@ void LLMessageSystem::clearReceiveState()
 	mMessageReader->clearMessage();
 	mLastMessageFromTrustedMessageService = false;
 	mbLastMessageEncrypted = FALSE;
+	mLastUnverifiedEncryptedCircuitCode = 0;
 }
 
 
@@ -548,7 +550,9 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 		else
 		{
 			LLHost host = getSender();
-			LLCircuitData* cdp;
+			// Only check for an existing circuit for now, don't revive any dead cicuit
+			// or reset the packet ID.
+			LLCircuitData* cdp = mCircuitInfo.findCircuit(host);
 
 			if (buffer[0] & LL_ENCRYPTED_FLAG)
 			{
@@ -559,21 +563,20 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 					valid_packet = FALSE;
 					continue;
 				}
-				// This is _only_ used for looking up the key used to encrypt the message,
-				// so this is distinct from `cdp`. Because of the loose coupling between the
-				// encrypted wrapper and the underlying message it would technically be possible
-				// to encrypt a message with another circuit's key. Basically, never use it to
-				// identify an underlying message as belonging to a particular circuit.
-				LLCircuitData* key_cdp = mCircuitInfo.findCircuit(host);
+				// key_circuit_code is _only_ used for looking up the key used to encrypt the message
+				// if we didn't already have a key associated with the circuit. Never use it to identify
+				// an underlying message as being sent on a particular circuit.
 				U32 key_circuit_code = ntohl(*(U32 *)&buffer[EPHL1_CIRCUIT_CODE]);
+				mLastUnverifiedEncryptedCircuitCode = key_circuit_code;
 				U8 *key = nullptr;
 				// If we already have a circuit for the sender's address, we may have an existing
-				// encryption key tied to the circuit.
-				if (key_cdp != nullptr)
+				// encryption key tied to the circuit. Prefer that over any key pointed to by the
+				// message's circuit code header if present.
+				if (cdp != nullptr)
 				{
-					key = key_cdp->getEncryptionKey();
+					key = cdp->getEncryptionKey();
 				}
-				// no circuit, or circuit doesn't have a key associated with it, try to derive one.
+				// No circuit, or circuit doesn't have a key associated with it yet. Try to derive one.
 				if (key_circuit_code && key == nullptr)
 				{
 					if(key_circuit_code == getOurCircuitCode())
@@ -597,8 +600,8 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 
 				if (key == nullptr)
 				{
-					LL_WARNS("Messaging") << "Received encrypted packet on unencrypted circuit " <<
-						key_circuit_code << LL_ENDL;
+					LL_WARNS("Messaging") << "Received encrypted packet on unencrypted circuit and could "
+											 "not derive an decryption key " << key_circuit_code << LL_ENDL;
 					valid_packet = FALSE;
 					continue;
 				}
@@ -606,6 +609,16 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				{
 					LL_WARNS("Messaging") << "Received invalid encrypted packet with key ID " <<
 										  key_circuit_code << LL_ENDL;
+					valid_packet = FALSE;
+					continue;
+				}
+			}
+			else
+			{
+				if (cdp != nullptr && cdp->isEncrypted())
+				{
+					LL_WARNS("Messaging") << "Received unencrypted packet on encrypted circuit, dropping " <<
+										  cdp->getHost() << LL_ENDL;
 					valid_packet = FALSE;
 					continue;
 				}
@@ -636,6 +649,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 			mCurrentRecvPacketID = ntohl(*((U32*)(&buffer[1])));
 
 			const bool resetPacketId = true;
+			// Look up circuit by host again, potentially reviving the circuit if it was dead.
 			cdp = findCircuit(host, resetPacketId);
 
 			// At this point, cdp is now a pointer to the circuit that
@@ -2097,6 +2111,22 @@ void LLMessageSystem::processUseCircuitCode(LLMessageSystem* msg,
 
 	if (circuit_code_in)
 	{
+		if (msg->getLastMessageEncrypted())
+		{
+			// May not identify the key actually used to encrypt the message, but there's definitely
+			// something funky going on it doesn't match the circuit code in the UseCircuitCode.
+			// This handler is the one that binds an encryption key to a circuit in newsim, so
+			// this guard is sufficient to prevent a key for the wrong circuit code being bound to
+			// a circuit.
+			U32 header_circuit_code = msg->getLastUnverifiedEncryptedCircuitCode();
+			if (header_circuit_code != circuit_code_in)
+			{
+				LL_WARNS("Messaging") << "UseCircuitCode sent for " << circuit_code_in
+									  << " but encrypted message header used key for " << header_circuit_code
+									  << LL_ENDL;
+				return;
+			}
+		}
 		//if (!msg->mCircuitCodes.checkKey(circuit_code_in))
 		code_session_map_t::iterator it;
 		it = msg->mCircuitCodes.find(circuit_code_in);
@@ -4248,6 +4278,11 @@ const LLHost& LLMessageSystem::getSender() const
 BOOL LLMessageSystem::getLastMessageEncrypted() const
 {
 	return mbLastMessageEncrypted;
+}
+
+U32 LLMessageSystem::getLastUnverifiedEncryptedCircuitCode() const
+{
+	return mLastUnverifiedEncryptedCircuitCode;
 }
 
 void LLMessageSystem::sendUntrustedSimulatorMessageCoro(std::string url, std::string message, LLSD body, UntrustedCallback_t callback)
