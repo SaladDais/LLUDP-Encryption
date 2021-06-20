@@ -3763,7 +3763,8 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 	gMessageSystem->enableCircuit(sim_host, TRUE);
 	if (encrypted)
 	{
-		gMessageSystem->enableCircuitEncryption(sim_host, gAgentSessionID);
+		U32 circuit_code = gMessageSystem->getOurCircuitCode();
+		gMessageSystem->enableCircuitEncryption(circuit_code, sim_host, gAgentSessionID);
 	}
 // <FS:CR> Aurora Sim
 	//LLViewerRegion* regionp =  LLWorld::getInstance()->addRegion(region_handle, sim_host);

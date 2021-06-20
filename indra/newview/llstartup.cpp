@@ -4417,7 +4417,10 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 		{
 			gMessageSystem->enableCircuit(gFirstSim, TRUE);
 			if (supported_encryption_schemes & 0x01)
-				gMessageSystem->enableCircuitEncryption(gFirstSim, gAgentSessionID);
+			{
+				U32 circuit_code = gMessageSystem->getOurCircuitCode();
+				gMessageSystem->enableCircuitEncryption(circuit_code, gFirstSim, gAgentSessionID);
+			}
 		}
 	}
 	std::string region_x_str = response["region_x"];

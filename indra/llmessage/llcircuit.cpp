@@ -110,7 +110,8 @@ LLCircuitData::LLCircuitData(const LLHost &host, TPACKETID in_id,
 	mLastPacketGap(0),
 	mHeartbeatInterval(circuit_heartbeat_interval), 
 	mHeartbeatTimeout(circuit_timeout),
-	mEncryptionKey(nullptr)
+	mEncryptionKey(nullptr),
+	mEncryptionKeyCircuitCode(0)
 {
 	// Need to guarantee that this time is up to date, we may be creating a circuit even though we haven't been
 	//  running a message system loop.
@@ -194,7 +195,7 @@ LLCircuitData::~LLCircuitData()
 		std::copy(doomed.begin(), doomed.end(), append);
 		LL_INFOS() << str.str() << LL_ENDL;
 	}
-	setEncryptionKey(nullptr);
+	delete mEncryptionKey;
 }
 
 

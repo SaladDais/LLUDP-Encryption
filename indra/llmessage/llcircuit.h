@@ -100,10 +100,12 @@ public:
 	void setRemoteID(const LLUUID& id) { mRemoteID = id; }
 	void setRemoteSessionID(const LLUUID& id) { mRemoteSessionID = id; }
 	U8* getEncryptionKey() const { return mEncryptionKey; }
-	void setEncryptionKey(U8* key)
+	U32 getEncryptionCircuitCode() const { return mEncryptionKeyCircuitCode; }
+	void setEncryptionKey(U32 circuit_code, U8* key)
 	{
 		delete mEncryptionKey;
 		mEncryptionKey = key;
+		mEncryptionKeyCircuitCode = circuit_code;
 	}
 
 	void		setTrusted(BOOL t);
@@ -203,6 +205,7 @@ protected:
 	LLUUID mRemoteID;
 	LLUUID mRemoteSessionID;
 	U8* mEncryptionKey;
+	U32 mEncryptionKeyCircuitCode;
 
 	LLThrottleGroup	mThrottles;
 

@@ -484,8 +484,9 @@ public:
 	static BOOL encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *key, U32 circuit_code);
 	BOOL decryptMessage(U8 **data_ptr, S32 *data_size, const U8 *key);
 	static U8* deriveEncryptionKey(const LLUUID &session_id, const LLHost &sim_addr);
-	void enableCircuitEncryption(const LLHost &remote_host, const LLUUID &session_id);
-	void enableCircuitEncryption(const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id);
+	void enableCircuitEncryption(U32 circuit_code, const LLHost &remote_host, const LLUUID &session_id);
+	void enableCircuitEncryption(
+		U32 circuit_code, const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id);
 
 private:
 	LLSD getReceivedMessageLLSD() const;

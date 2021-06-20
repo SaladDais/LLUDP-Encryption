@@ -516,6 +516,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 		
 		BOOL recv_reliable = FALSE;
 		BOOL recv_resent = FALSE;
+		BOOL recv_encrypted = FALSE;
 		BOOL too_short = FALSE;
 		S32 acks = 0;
 		S32 true_rcv_size = 0;
@@ -556,7 +557,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 
 			if (buffer[0] & LL_ENCRYPTED_FLAG)
 			{
-				mbLastMessageEncrypted = TRUE;
+				recv_encrypted = mbLastMessageEncrypted = TRUE;
 				if (buffer[EPHL_ENCRYPTION_SCHEME] != 0x01)
 				{
 					LL_WARNS("Messaging") << "Unsupported encryption scheme " << buffer[1] << LL_ENDL;
@@ -565,7 +566,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				}
 				// key_circuit_code is _only_ used for looking up the key used to encrypt the message
 				// if we didn't already have a key associated with the circuit. Never use it to identify
-				// an underlying message as being sent on a particular circuit.
+				// an underlying message as actually being sent on a particular circuit.
 				U32 key_circuit_code = ntohl(*(U32 *)&buffer[EPHL1_CIRCUIT_CODE]);
 				mLastUnverifiedEncryptedCircuitCode = key_circuit_code;
 				U8 *key = nullptr;
@@ -575,6 +576,18 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				if (cdp != nullptr)
 				{
 					key = cdp->getEncryptionKey();
+					// Once a key's tied to the circuit you can't use another one.
+					if (key != nullptr)
+					{
+						U32 expected_key_circuit_code = cdp->getEncryptionCircuitCode();
+						if (expected_key_circuit_code != key_circuit_code)
+						{
+							LL_WARNS("Messaging") << "Attempted to use incorrect key " << key_circuit_code <<
+							" on circuit tied to key " << expected_key_circuit_code << LL_ENDL;
+							valid_packet = FALSE;
+							continue;
+						}
+					}
 				}
 				// No circuit, or circuit doesn't have a key associated with it yet. Try to derive one.
 				if (key_circuit_code && key == nullptr)
@@ -748,6 +761,22 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				 _PREHASH_UseCircuitCode))
 			{
 				logMsgFromInvalidCircuit( host, recv_reliable );
+				clearReceiveState();
+				valid_packet = FALSE;
+			}
+
+			// The only encrypted message allowed on existing circuits that
+			// aren't already bound to an encryption key is UseCircuitCode.
+			// That message is used to enable encryption for a circuit and
+			// must itself be encrypted.
+			if (
+				valid_packet &&
+				recv_encrypted &&
+				cdp &&
+				!cdp->isEncrypted() &&
+				(mTemplateMessageReader->getMessageName() !=
+				 _PREHASH_UseCircuitCode))
+			{
 				clearReceiveState();
 				valid_packet = FALSE;
 			}
@@ -1741,14 +1770,14 @@ void LLMessageSystem::enableCircuit(const LLHost &host, BOOL trusted)
 }
 
 void LLMessageSystem::enableCircuitEncryption(
-	const LLHost &remote_host, const LLUUID &session_id)
+	U32 circuit_code, const LLHost &remote_host, const LLUUID &session_id)
 {
 	// On the client both remote host and circuit host are the same
-	enableCircuitEncryption(remote_host, remote_host, session_id);
+	enableCircuitEncryption(circuit_code, remote_host, remote_host, session_id);
 }
 
 void LLMessageSystem::enableCircuitEncryption(
-	const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id)
+	U32 circuit_code, const LLHost &remote_host, const LLHost &circuit_host, const LLUUID &session_id)
 {
 	// remote host may be a client address from newsim's point of view, but the circuit
 	// host is the one that's mixed into the key. In newsim that'll be the untrusted message
@@ -1756,7 +1785,7 @@ void LLMessageSystem::enableCircuitEncryption(
 	LLCircuitData *cdp = findCircuit(remote_host, FALSE);
 	if (cdp != nullptr)
 	{
-		cdp->setEncryptionKey(deriveEncryptionKey(session_id, circuit_host));
+		cdp->setEncryptionKey(circuit_code, deriveEncryptionKey(session_id, circuit_host));
 	}
 	else
 	{
@@ -2206,10 +2235,11 @@ void LLMessageSystem::processUseCircuitCode(LLMessageSystem* msg,
 		{
 			cdp->setRemoteID(id);
 			cdp->setRemoteSessionID(session_id);
-			// If the UseCircuitCode was encrypted, then we should enable encryption for the circuit
+			// If the UseCircuitCode was encrypted then we should enable encryption for the circuit
 			if (msg->getLastMessageEncrypted())
 			{
-				cdp->setEncryptionKey(deriveEncryptionKey(session_id, msg->getUntrustedInterface()));
+				U8 *key = deriveEncryptionKey(session_id, msg->getUntrustedInterface());
+				cdp->setEncryptionKey(circuit_code_in, key);
 			}
 		}
 

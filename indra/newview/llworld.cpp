@@ -1667,7 +1667,8 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
 	msg->enableCircuit(sim, TRUE);
 	if (encrypted)
 	{
-		msg->enableCircuitEncryption(sim, gAgentSessionID);
+		U32 circuit_code = msg->getOurCircuitCode();
+		msg->enableCircuitEncryption(circuit_code, sim, gAgentSessionID);
 	}
 // <FS:CR> Aurora Sim
 	//LLWorld::getInstance()->addRegion(handle, sim);
