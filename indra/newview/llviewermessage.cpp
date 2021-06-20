@@ -3692,7 +3692,7 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 	U32 location_id;
 	U32 sim_ip;
 	U16 sim_port;
-	BOOL encrypted;
+	BOOL encrypted = FALSE;
 	LLVector3 pos, look_at;
 	U64 region_handle;
 	msg->getU32Fast(_PREHASH_Info, _PREHASH_LocationID, location_id);
