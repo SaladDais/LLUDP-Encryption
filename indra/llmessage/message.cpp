@@ -1500,11 +1500,8 @@ S32 LLMessageSystem::sendMessage(const LLHost &host)
 	if (cdp->isEncrypted())
 	{
 		const U8* key = cdp->getEncryptionKey();
-		// getOurCircuitCode will be 0 if newsim if this is called from newsim. That's fine
-		// since viewers should never need the circuit code from the message header to figure
-		// out what encryption key to use. Sims are strongly tied to a specific circuit address
-		// in the viewer code and they can't change while connected.
-		if (!encryptMessage(&buf_ptr, &buffer_length, key, getOurCircuitCode()))
+		U32 key_circuit_code = cdp->getEncryptionCircuitCode();
+		if (!encryptMessage(&buf_ptr, &buffer_length, key, key_circuit_code))
 		{
 			LL_ERRS("Messaging") << "Failed to encrypt outbound message, refusing to send" << LL_ENDL;
 			may_send = FALSE;
