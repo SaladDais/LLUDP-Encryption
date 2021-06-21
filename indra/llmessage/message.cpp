@@ -614,7 +614,7 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 				if (key == nullptr)
 				{
 					LL_WARNS("Messaging") << "Received encrypted packet on unencrypted circuit and could "
-											 "not derive an decryption key " << key_circuit_code << LL_ENDL;
+											 "not derive an encryption key " << key_circuit_code << LL_ENDL;
 					valid_packet = FALSE;
 					continue;
 				}
