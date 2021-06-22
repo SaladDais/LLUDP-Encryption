@@ -1421,7 +1421,7 @@ version 2.0
 	}
 	{
 		CircuitEncryptionInfo	Variable
-		{	SupportedSchemes	U8	} // ORed together vals from encryption scheme enum
+		{	SupportedVersions	U8	} // ORed together vals from encryption version enum
 	}
 }
 
@@ -3424,7 +3424,7 @@ version 2.0
 	}
 	{
 		CircuitEncryptionInfo	Variable
-		{	SupportedSchemes	U8	} // ORed together vals from encryption scheme enum
+		{	SupportedVersions	U8	} // ORed together vals from encryption version enum
 	}
 }
 

@@ -3729,10 +3729,10 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
 	// expect these to be there. Dunno.
 	if (msg->has("CircuitEncryptionInfo"))
 	{
-		U8 supported_schemes;
-		msg->getU8("CircuitEncryptionInfo", "SupportedSchemes", supported_schemes);
-		// V1 encryption scheme supported
-		encrypted = supported_schemes & 0x1;
+		U8 supported_versions;
+		msg->getU8("CircuitEncryptionInfo", "SupportedVersions", supported_versions);
+		// V1 encryption supported
+		encrypted = supported_versions & MESSAGE_ENCRYPTION_V1;
 	}
 
 	std::string seedCap;

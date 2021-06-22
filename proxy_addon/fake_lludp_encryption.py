@@ -258,7 +258,7 @@ class FakeLLUDPEncryptionAddon(BaseAddon):
                 sim_addr = msg["Info"]["SimIP"], msg["Info"]["SimPort"]
             add_encryption_field = self._addr_supports_encryption(sim_addr)
         if add_encryption_field:
-            event["body"]["CircuitEncryptionInfo"] = [{"SupportedSchemes": 1}]
+            event["body"]["CircuitEncryptionInfo"] = [{"SupportedVersions": 1}]
 
     def handle_http_response(self, session_manager: SessionManager, flow: HippoHTTPFlow):
         if flow.cap_data.cap_name == "LoginRequest":
@@ -267,7 +267,7 @@ class FakeLLUDPEncryptionAddon(BaseAddon):
             body = resp[0]
             sim_addr = body["sim_ip"], body["sim_port"]
             if self._addr_supports_encryption(sim_addr):
-                body["supported_encryption_schemes"] = "1"
+                body["supported_encryption_versions"] = "1"
             flow.response.text = xmlrpc.client.dumps(resp, methodname=method_name, allow_none=True)
 
 

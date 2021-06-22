@@ -4400,11 +4400,11 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 		gMessageSystem->mOurCircuitCode = strtoul(text.c_str(), NULL, 10);
 	}
 
-	U8 supported_encryption_schemes = 0;
-	text = response["supported_encryption_schemes"].asString();
+	U8 supported_encryption_versions = 0;
+	text = response["supported_encryption_versions"].asString();
 	if (!text.empty())
 	{
-		supported_encryption_schemes = (U8)strtoul(text.c_str(), NULL, 10);
+		supported_encryption_versions = (U8)strtoul(text.c_str(), NULL, 10);
 	}
 
 	std::string sim_ip_str = response["sim_ip"];
@@ -4416,7 +4416,7 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 		if (gFirstSim.isOk())
 		{
 			gMessageSystem->enableCircuit(gFirstSim, TRUE);
-			if (supported_encryption_schemes & 0x01)
+			if (supported_encryption_versions & MESSAGE_ENCRYPTION_V1)
 			{
 				U32 circuit_code = gMessageSystem->getOurCircuitCode();
 				gMessageSystem->enableCircuitEncryption(circuit_code, gFirstSim, gAgentSessionID);

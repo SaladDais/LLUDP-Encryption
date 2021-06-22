@@ -558,9 +558,10 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 			if (buffer[0] & LL_ENCRYPTED_FLAG)
 			{
 				recv_encrypted = mbLastMessageEncrypted = TRUE;
-				if (buffer[EPHL_ENCRYPTION_SCHEME] != 0x01)
+				U8 encryption_version = buffer[EPHL_ENCRYPTION_VERSION];
+				if (encryption_version != MESSAGE_ENCRYPTION_V1)
 				{
-					LL_WARNS("Messaging") << "Unsupported encryption scheme " << buffer[1] << LL_ENDL;
+					LL_WARNS("Messaging") << "Unsupported encryption version " << encryption_version << LL_ENDL;
 					valid_packet = FALSE;
 					continue;
 				}
@@ -604,7 +605,8 @@ BOOL LLMessageSystem::checkMessages(LockMessageChecker&, S64 frame_count )
 						// from a viewer since due to NAT we have no way of knowing which addr tuple they
 						// will connect from, and otherwise we have no idea what key to use to decrypt.
 						const code_session_map_t::iterator it = mCircuitCodes.find(key_circuit_code);
-						if (it != mCircuitCodes.end()) {
+						if (it != mCircuitCodes.end())
+						{
 							// I think UntrustedInterface is the address that gets advertised to clients?
 							key = deriveEncryptionKey(it->second, getUntrustedInterface());
 						}
@@ -1242,7 +1244,7 @@ BOOL LLMessageSystem::encryptMessage(U8 **data_ptr, U32 *data_size, const U8 *ke
 	U8 *ciphertext = (U8 *)&encryptedSendBuffer[EPHL1_CIPHERTEXT];
 
 	encryptedSendBuffer[EPHL_FLAGS] = LL_ENCRYPTED_FLAG;
-	encryptedSendBuffer[EPHL_ENCRYPTION_SCHEME] = 0x01; // v1 encryption scheme
+	encryptedSendBuffer[EPHL_ENCRYPTION_VERSION] = MESSAGE_ENCRYPTION_V1;
 	// first 4 bytes of 12 byte nonce are packet ID
 	memcpy(&encryptedSendBuffer[EPHL1_NONCE], &data[PHL_PACKET_ID], 4);
 	// The last 8 are random

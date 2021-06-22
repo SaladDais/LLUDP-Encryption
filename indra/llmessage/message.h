@@ -146,13 +146,19 @@ enum EPacketHeaderLayout
 enum EEncryptedPacketHeaderLayout
 {
 	EPHL_FLAGS = 0,
-	EPHL_ENCRYPTION_SCHEME = 1,
+	EPHL_ENCRYPTION_VERSION = 1,
 };
 enum EEncryptedPacketHeaderV1Layout
 {
 	EPHL1_NONCE = 2,
 	EPHL1_CIRCUIT_CODE = 14,
 	EPHL1_CIPHERTEXT = 18,
+};
+enum EMessageEncryptionVersions
+{
+	// flags field for supported versions
+	MESSAGE_ENCRYPTION_UNSUPPORTED = 0,
+	MESSAGE_ENCRYPTION_V1 = 1 << 0,
 };
 const U32 ENCRYPTED_MESSAGE_TAG_LENGTH = 16;
 // send flags byte + scheme byte + nonce + circuit id + GCM authentication tag

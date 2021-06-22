@@ -1636,10 +1636,10 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
 	msg->getIPPortFast(_PREHASH_SimulatorInfo, _PREHASH_Port, port);
 	if (msg->has("CircuitEncryptionInfo"))
 	{
-		U8 supported_schemes;
-		msg->getU8("CircuitEncryptionInfo", "SupportedSchemes", supported_schemes);
+		U8 supported_versions;
+		msg->getU8("CircuitEncryptionInfo", "SupportedVersions", supported_versions);
 		// V1 encryption scheme supported
-		encrypted = supported_schemes & 0x1;
+		encrypted = supported_versions & MESSAGE_ENCRYPTION_V1;
 	}
 
 	// which simulator should we modify?
