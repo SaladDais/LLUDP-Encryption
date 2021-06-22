@@ -40,18 +40,24 @@ This scheme is fully backwards-compatible, and clients can still connect to sims
 
 ```
 UDP Header:
-    U8 send_flags = 0x08 (indicates message is encrypted, no other flags may be set)
-    U8 scheme = 0x01 (V1 encryption scheme)
-    U8 nonce[12] = 4 byte packet id + 8 bytes random
-    U32 circuit_code (will be used to look up the shared secret used to encrypt the packet)
-    U8 ciphertext[...] (whatever's left is the ciphertext, contains encrypted message)
+    // indicates message is encrypted, no other flags may be set.
+    // for symmetry with unencrypted UDP packet header, allows both
+    // encrypted and unencrypted messages to be sent over the same port.
+    U8 send_flags = 0x08
+    U8 version = 0x01
+    U8 nonce[12] = <4 byte packet id + 8 bytes random>
+    // will be used to look up the shared secret used to encrypt the packet
+    U32 circuit_code
+    // whatever's left is the ciphertext, contains encrypted message.
+    // last 16 bytes are authentication tag
+    U8 ciphertext[...]
 ```
 
 The ciphertext contains a complete, encrypted version of an LLUDP message, including packet ID, headers, and acks field.
 When decrypted, it should be indistinguishable from other messages of the existing, unencrypted message form.
 
 indra's newsim already has a map of circuit code -> session ID, so no extra state needs to be passed around between
-sims to support encryption. Sims only need to know which encryption schemes their neighbours and teleport destination
+sims to support encryption. Sims only need to know which encryption versions their neighbours and teleport destination
 regions support so that they can inform clients.
 
 # Trying it out
