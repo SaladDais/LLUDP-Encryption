@@ -55,12 +55,12 @@ class EncryptedSendFlags(enum.IntEnum):
     ENCRYPTED = 0x08
 
 
-class EncryptionScheme(enum.IntEnum):
+class EncryptionVersion(enum.IntEnum):
     V1 = 1
 
 
 @dataclasses.dataclass
-class V1SchemePayload:
+class V1Payload:
     # By convention the first 4 bytes of `nonce_bytes` are the packet ID,
     # the other 8 bytes are from a PRNG.
     nonce: bytes = se.dataclass_field(se.BytesFixed(12))
@@ -76,10 +76,10 @@ class V1SchemePayload:
 @dataclasses.dataclass
 class EncryptedMessageWrapper:
     send_flags: EncryptedSendFlags = se.dataclass_field(se.IntEnum(EncryptedSendFlags, se.U8))
-    # Tagged union with encryption scheme and payload, only V1 scheme for now.
-    payload: Tuple[EncryptionScheme, Union[V1SchemePayload]] = se.dataclass_field(
-        se.EnumSwitch(se.IntEnum(EncryptionScheme, se.U8), {
-            EncryptionScheme.V1: se.Dataclass(V1SchemePayload),
+    # Tagged union with encryption version and payload, only V1 for now.
+    payload: Tuple[EncryptionVersion, Union[V1Payload]] = se.dataclass_field(
+        se.EnumSwitch(se.IntEnum(EncryptionVersion, se.U8), {
+            EncryptionVersion.V1: se.Dataclass(V1Payload),
         }),
     )
 
@@ -117,7 +117,7 @@ class EncryptingTransportWrapper(AbstractUDPTransport):
         nonce = packet.data[1:5] + secrets.token_bytes(8)
         aes = cryptography.hazmat.primitives.ciphers.aead.AESGCM(self.encryption_key)
         encrypted = aes.encrypt(nonce, packet.data, None)
-        payload = V1SchemePayload(
+        payload = V1Payload(
             nonce=nonce,
             circuit_code=self.circuit_code,
             ciphertext=encrypted,
@@ -125,7 +125,7 @@ class EncryptingTransportWrapper(AbstractUDPTransport):
         writer = se.BufferWriter("!")
         writer.write(ENCRYPTED_MESSAGE_SPEC, EncryptedMessageWrapper(
             send_flags=EncryptedSendFlags.ENCRYPTED,
-            payload=(EncryptionScheme.V1, payload),
+            payload=(EncryptionVersion.V1, payload),
         ))
         packet.data = writer.buffer
         self.base_transport.send_packet(packet)
@@ -192,9 +192,9 @@ class FakeLLUDPEncryptionAddon(BaseAddon):
 
         reader = se.BufferReader("!", packet.data)
         unpacked: EncryptedMessageWrapper = reader.read(ENCRYPTED_MESSAGE_SPEC)
-        scheme, payload = unpacked.payload
-        if scheme != EncryptionScheme.V1:
-            logging.error(f"Unknown encryption scheme, not sending! {scheme!r}")
+        version, payload = unpacked.payload
+        if version != EncryptionVersion.V1:
+            logging.error(f"Unknown encryption version, not sending! {version!r}")
             return True
         key_session = self._circuit_code_to_session(session_manager, payload.circuit_code)
         if key_session is None:
